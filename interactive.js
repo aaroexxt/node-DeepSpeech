@@ -7,8 +7,10 @@ const Ds = require('deepspeech');
 const argparse = require('argparse');
 const MemoryStream = require('memory-stream');
 const Wav = require('node-wav');
-const Duplex = require('stream').Duplex;
 const util = require('util');
+
+
+const AUDIO_LENGTH_MS = 10000; //length of audio to record
 
 // These constants control the beam search decoder
 
@@ -50,20 +52,11 @@ parser.addArgument(['--model'], {required: true, help: 'Path to the model (proto
 parser.addArgument(['--alphabet'], {required: true, help: 'Path to the configuration file specifying the alphabet used by the network'});
 parser.addArgument(['--lm'], {help: 'Path to the language model binary file', nargs: '?'});
 parser.addArgument(['--trie'], {help: 'Path to the language model trie file created with native_client/generate_trie', nargs: '?'});
-parser.addArgument(['--audio'], {required: true, help: 'Path to the audio file to run (WAV format)'});
 parser.addArgument(['--version'], {action: VersionAction, help: 'Print version and exits'})
 var args = parser.parseArgs();
 
 function totalTime(hrtimeValue) {
   return (hrtimeValue[0] + hrtimeValue[1] / 1000000000).toPrecision(4);
-}
-
-
-const buffer = Fs.readFileSync(args['audio']);
-const result = Wav.decode(buffer);
-
-if (result.sampleRate < 16000) {
-  console.error('Warning: original sample rate (' + result.sampleRate + ') is lower than 16kHz. Up-sampling might produce erratic speech recognition.');
 }
 
 function bufferToStream(buffer) {
@@ -73,9 +66,21 @@ function bufferToStream(buffer) {
   return stream;
 }
 
+var micInstance = mic({
+    sampleRate: 16000,
+    channels: 1,
+    debug: true,
+    fileType: "wav",
+    bits: 16,
+    encoding: 'signed-integer',
+    endian: 'little',
+    compression: 0.0
+    //exitOnSilence: 6
+});
+var micInputStream = micInstance.getAudioStream();
 var audioStream = new MemoryStream();
-bufferToStream(buffer).
-  pipe(Sox({
+
+var transform = Sox({
     global: {
       'no-dither': true,
     },
@@ -88,9 +93,21 @@ bufferToStream(buffer).
       compression: 0.0,
       type: 'raw'
     }
-  })).
-  pipe(audioStream);
+  })
 
+micInputStream.pipe(transform).pipe(audioStream);
+
+micInstance.start();
+
+setTimeout( () => {
+  micInstance.stop();
+
+},AUDIO_LENGTH_MS);
+
+
+audioStream.on('finish', () => {
+  console.log("Recording finished; processing audio")
+});
 audioStream.on('finish', () => {
   audioBuffer = audioStream.toBuffer();
 
